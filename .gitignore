@@ -1,0 +1,59 @@
+# Some annoying OP2 things
+trygon_op.cpp
+.generated
+
+# HDF5 files
+*.h5
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+trygon_genseq
+trygon_mpi_genseq
+trygon_mpi_openmp
+trygon_mpi_seq
+trygon_openmp
+trygon_seq
+
+# Annoying fortran write files
+fort.*
+
+# THe build files, should they be there
+cuda/*
+openacc/*
+openmp/*
+openmp4/*
+seq/*
+
+# Emacs backup files
+*~
+#*#

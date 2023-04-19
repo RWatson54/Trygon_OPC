@@ -309,6 +309,7 @@ int main(int argc, char **argv) {
   /*
   // write out to the HDF file
   */
+  op_fetch_data_hdf5_file(p_xSolnPoints, "new_data.h5");
   op_fetch_data_hdf5_file(p_qSolnPoints, "new_data.h5");
 
   /*

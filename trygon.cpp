@@ -100,9 +100,14 @@ double gam, gm1, cfl, eps, mach, alpha, qinf[4];
 // kernel routines for parallel loops
 */
 
+#include "qts2q0s.h"
 #include "qts2qtf.h"
 #include "qts2fhs.h"
 #include "fhs2dts.h"
+#include "qtf2itf.h"
+#include "fhs2ftf.h"
+#include "dts2cts.h"
+#include "cts2qts.h"
 
 /*
 // include some other header files
@@ -114,6 +119,13 @@ double gam, gm1, cfl, eps, mach, alpha, qinf[4];
 */
 
 int main(int argc, char **argv) {
+
+  /* 
+  // Define a couple of compiler-level constants for dimensioning
+  */ 
+
+  #define nDim 2
+  #define nPde 1
 
   /*
   // OP initialisation
@@ -160,25 +172,37 @@ int main(int argc, char **argv) {
 
   // Data to be read from file
 
-  op_dat p_xCentrs     = op_decl_dat_hdf5(elements,     2, "double", file, "p_xCentrs");
-  op_dat p_xSolnPoints = op_decl_dat_hdf5(solnpoints,   2, "double", file, "p_xSolnPoints");
-  op_dat p_qSolnPoints = op_decl_dat_hdf5(solnpoints,   1, "double", file, "p_qSolnPoints");
-  op_dat p_mSolnPoints = op_decl_dat_hdf5(solnpoints, 2*2, "double", file, "p_mSolnPoints");
+  op_dat p_xCentrs     = op_decl_dat_hdf5(elements,       nDim, "double", file, "p_xCentrs");
+  op_dat p_xSolnPoints = op_decl_dat_hdf5(solnpoints,     nDim, "double", file, "p_xSolnPoints");
+  op_dat p_qSolnPoints = op_decl_dat_hdf5(solnpoints,     nPde, "double", file, "p_qSolnPoints");
+  op_dat p_mSolnPoints = op_decl_dat_hdf5(solnpoints,nDim*nDim, "double", file, "p_mSolnPoints");
+  op_dat p_jSolnPoints = op_decl_dat_hdf5(solnpoints,        1, "double", file, "p_jSolnPoints");
+  op_dat p_nIntfces    = op_decl_dat_hdf5(intfces,        nDim, "double", file, "p_nIntfces");
 
   /*
   // Data to be generated locally
   */ 
 
-  double *qFluxPoints; qFluxPoints = (double *)malloc(1 * op_get_size(fluxpoints) * sizeof(double));
-  op_dat p_qFluxPoints = op_decl_dat(fluxpoints, 1, "double", qFluxPoints, "p_qFluxPoints");
+  double *oSolnPoints; oSolnPoints = (double *)malloc(nPde * op_get_size(solnpoints) * sizeof(double));
+  op_dat p_oSolnPoints = op_decl_dat(solnpoints,      nPde, "double", oSolnPoints, "p_oSolnPoints");
 
-  double *fSolnPoints; fSolnPoints = (double *)malloc(2 * op_get_size(solnpoints) * sizeof(double));
-  op_dat p_fSolnPoints = op_decl_dat(solnpoints, 2, "double", fSolnPoints, "p_fSolnPoints");
+  double *qFluxPoints; qFluxPoints = (double *)malloc(nPde * op_get_size(fluxpoints) * sizeof(double));
+  op_dat p_qFluxPoints = op_decl_dat(fluxpoints,      nPde, "double", qFluxPoints, "p_qFluxPoints");
 
-  double *dSolnPoints; dSolnPoints = (double *)malloc(1 * op_get_size(solnpoints) * sizeof(double));
-  op_dat p_dSolnPoints = op_decl_dat(solnpoints, 1, "double", dSolnPoints, "p_dSolnPoints");
+  double *fSolnPoints; fSolnPoints = (double *)malloc(nDim*nPde * op_get_size(solnpoints) * sizeof(double));
+  op_dat p_fSolnPoints = op_decl_dat(solnpoints, nDim*nPde, "double", fSolnPoints, "p_fSolnPoints");
 
-  // Constants
+  double *dSolnPoints; dSolnPoints = (double *)malloc(nPde * op_get_size(solnpoints) * sizeof(double));
+  op_dat p_dSolnPoints = op_decl_dat(solnpoints,      nPde, "double", dSolnPoints, "p_dSolnPoints");
+
+  double *iFluxPoints; iFluxPoints = (double *)malloc(nPde * op_get_size(fluxpoints) * sizeof(double));
+  op_dat p_iFluxPoints = op_decl_dat(fluxpoints,      nPde, "double", iFluxPoints, "p_iFluxPoints");
+
+  double *fFluxPoints; fFluxPoints = (double *)malloc(nPde * op_get_size(fluxpoints) * sizeof(double));
+  op_dat p_fFluxPoints = op_decl_dat(fluxpoints,      nPde, "double", fFluxPoints, "p_fFluxPoints");
+
+  double *cSolnPoints; cSolnPoints = (double *)malloc(nPde * op_get_size(solnpoints) * sizeof(double));
+  op_dat p_cSolnPoints = op_decl_dat(solnpoints,      nPde, "double", cSolnPoints, "p_cSolnPoints");
 
   op_printf(" ...done. \n");
 
@@ -206,69 +230,86 @@ int main(int argc, char **argv) {
   // The main time-marching loop
   */ 
 
-  niter = 1;
+  niter = 20000;
 
   for (int iter = 1; iter <= niter; iter++) {
+
+    /*
+    // Step 0 --- Save the old conserved variables at the solution points
+    */
+
+    op_par_loop(qts2q0s, "qts2q0s", solnpoints, 
+    		          op_arg_dat(p_qSolnPoints, -1, OP_ID,      nPde, "double", OP_READ),
+    		          op_arg_dat(p_oSolnPoints, -1, OP_ID,      nPde, "double", OP_WRITE) );
 
     /*
     // Step 1 --- Project the solution to the flux points
     */
 
     op_par_loop(qts2qtf, "qts2qtf", elements, 
-    		          op_arg_dat(p_qSolnPoints, -25, pElementsSolnPoints, 1, "double", OP_READ),
-    		          op_arg_dat(p_qFluxPoints, -20, pElementsFluxPoints, 1, "double", OP_WRITE) );
+    		          op_arg_dat(p_qSolnPoints, -25, pElementsSolnPoints, nPde, "double", OP_READ),
+    		          op_arg_dat(p_qFluxPoints, -20, pElementsFluxPoints, nPde, "double", OP_WRITE) );
 
     /*
     // Step 2 --- Compute the fluxes at the solution points
     */
 
     op_par_loop(qts2fhs, "qts2fhs", solnpoints, 
-    		          op_arg_dat(p_qSolnPoints, -1, OP_ID,   1, "double", OP_READ),
-    		          op_arg_dat(p_mSolnPoints, -1, OP_ID, 2*2, "double", OP_READ),
-    		          op_arg_dat(p_fSolnPoints, -1, OP_ID,   2, "double", OP_WRITE) );
+    		          op_arg_dat(p_qSolnPoints, -1, OP_ID,      nPde, "double", OP_READ),
+    		          op_arg_dat(p_mSolnPoints, -1, OP_ID, nDim*nDim, "double", OP_READ),
+    		          op_arg_dat(p_fSolnPoints, -1, OP_ID, nDim*nPde, "double", OP_WRITE) );
 
     /*
     // Step 3 --- Compute the divergence of the fluxes at the solution points
     */
 
     op_par_loop(fhs2dts, "fhs2dts", elements, 
-    		          op_arg_dat(p_fSolnPoints, -25, pElementsSolnPoints, 2, "double", OP_READ),
-    		          op_arg_dat(p_dSolnPoints, -25, pElementsSolnPoints, 1, "double", OP_WRITE) );
+    		          op_arg_dat(p_fSolnPoints, -25, pElementsSolnPoints, nDim*nPde, "double", OP_READ),
+    		          op_arg_dat(p_dSolnPoints, -25, pElementsSolnPoints,      nPde, "double", OP_WRITE) );
 
     /*
     // Step 4 --- Compute the common interface fluxes at the flux points
     */
 
-    op_par_loop(fhs2dts, "qtf2itf", elements, 
-    		          op_arg_dat(p_fSolnPoints, -25, pElementsSolnPoints, 2, "double", OP_READ),
-    		          op_arg_dat(p_dSolnPoints, -25, pElementsSolnPoints, 1, "double", OP_WRITE) );
+    op_par_loop(qtf2itf, "qtf2itf", intfces,
+    		          op_arg_dat(p_qFluxPoints, -2, pInfceFluxPoints, nPde, "double", OP_READ),
+    		          op_arg_dat(p_nIntfces,    -1, OP_ID,            nDim, "double", OP_READ),
+    		          op_arg_dat(p_iFluxPoints, -2, pInfceFluxPoints, nPde, "double", OP_WRITE) );
 
     /*
     // Step 5 --- Compute the projection of the normal fluxes to the flux points
     */
 
+    op_par_loop(fhs2ftf, "fhs2ftf", elements, 
+    		          op_arg_dat(p_fSolnPoints, -25, pElementsSolnPoints, nDim*nPde, "double", OP_READ),
+    		          op_arg_dat(p_fFluxPoints, -20, pElementsFluxPoints,      nPde, "double", OP_WRITE) );
 
     /*
     // Step 6 --- Correct the divergence of the fluxes at the solution points
     */
 
+    op_par_loop(dts2cts, "dts2cts", elements,
+    		          op_arg_dat(p_iFluxPoints, -20, pElementsFluxPoints, nPde, "double", OP_READ),
+    		          op_arg_dat(p_fFluxPoints, -20, pElementsFluxPoints, nPde, "double", OP_READ), 
+    		          op_arg_dat(p_dSolnPoints, -25, pElementsSolnPoints, nPde, "double", OP_READ),
+    		          op_arg_dat(p_cSolnPoints, -25, pElementsSolnPoints, nPde, "double", OP_WRITE) );
 
     /*
-    // Step 7 --- Update the solution
+    // Step 7 --- Update the solution at the solution points
     */
 
-
-
-
+    op_par_loop(cts2qts, "cts2qts", solnpoints, 
+    		          op_arg_dat(p_cSolnPoints, -1, OP_ID,      nPde, "double", OP_READ),
+    		          op_arg_dat(p_jSolnPoints, -1, OP_ID,         1, "double", OP_READ),
+    		          op_arg_dat(p_oSolnPoints, -1, OP_ID,      nPde, "double", OP_READ),
+    		          op_arg_dat(p_qSolnPoints, -1, OP_ID,      nPde, "double", OP_WRITE) );
 
   }
 
   /*
   // write out to the HDF file
   */
-  op_fetch_data_hdf5_file(p_qFluxPoints, "new_data.h5");
-  op_fetch_data_hdf5_file(p_fSolnPoints, "new_data.h5");
-  op_fetch_data_hdf5_file(p_dSolnPoints, "new_data.h5");
+  op_fetch_data_hdf5_file(p_qSolnPoints, "new_data.h5");
 
   /*
   // check the timers for total execution wall time
